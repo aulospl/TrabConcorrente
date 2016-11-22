@@ -115,67 +115,52 @@ int main(int argc, char *argv[]){
   /*Ordena a lista de possiveis pivos.*/
   QuickSort(ListaPossiveisPivos, 0, ((num_processos-1)*num_processos)-1);
 
-  int comm_sz = num_processos, my_rank;
-  int *pivos, *localPivos;
+  int comm_sz, my_rank;
+  int *pivos;
   int *vetor_part;
 
   pivos = (int*)malloc(sizeof(int)*num_processos-1);
   if(pivos == NULL)
     return 1;
 
-  vetor_part = (int*)malloc(sizeof(int)*(tam_vetor/num_processos));
+  i = (tam_vetor/num_processos) + (tam_vetor%num_processos);
+
+  vetor_part = (int*)malloc(sizeof(int)*i);
   if(vetor_part == NULL)
         return 1;
 
-  localPivos = (int*)malloc((num_processos-1)*sizeof(int));
-  if(localPivos == NULL)
-    return 1;
-
+  comm_sz = num_processos;
   MPI_Init(NULL, NULL);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-  //Define vetor de pivos
-  for(i=0;i<num_processos-1;i++){
-     pivos[i] = ListaPossiveisPivos[num_processos+(i*num_processos/2)-1];
-  }
-
   if(my_rank == 0){
-        MPI_Scatter(vetor, num_processos, MPI_INTEGER, vetor_part, tam_vetor/num_processos,
+       //Define vetor de pivos
+        for(i=0;i<num_processos-1;i++){
+          pivos[i] = ListaPossiveisPivos[num_processos+(i*num_processos/2)-1];
+        }
+
+        MPI_Scatter(vetor, num_processos, MPI_INTEGER, vetor_part, (tam_vetor/num_processos) + (tam_vetor&num_processos),
             MPI_INTEGER, 0, MPI_COMM_WORLD);
 
-        MPI_Bcast(pivos, num_processos-1, MPI_INTEGER, 0, MPI_COMM_WORLD);
+        MPI_Bcast(pivos, num_processos-1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
   }
 
-  //MPI_Recv(vetor_part, num_processos, MPI_INTEGER, 0, ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-  MPI_Recv(localPivos, num_processos-1, MPI_INTEGER, 0, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-  int j=0;
-
-printf("TESTE\n");
-  while(j<tam_vetor/num_processos){
+  int j, k;
+  for(j=0; j<(tam_vetor/num_processos); j++){
       if(my_rank == 0){
-          if(vetor_part[j] > localPivos[my_rank]){
-              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, 0, MPI_COMM_WORLD);
-              j++;
+          if(vetor_part[j] > pivos[my_rank]){
+              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
+              k = j;
           }
-      }
-      else if(my_rank == num_processos-1){
-          if(vetor_part[j] < localPivos[my_rank]){
-              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, 0, MPI_COMM_WORLD);
+      }else if(my_rank == num_processos-1){
+          if(vetor_part[j] < pivos[my_rank]){
+              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
+              k = j;
           }
+      }else{
+          if(vetor_part[j] < )
       }
-      else{
-          if(vetor_part[j] > localPivos[my_rank] && vetor_part[j] < localPivos[my_rank-1]){
-              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, 0, MPI_COMM_WORLD);
-              j++;
-          }
-      }
-  }
-
-  printf("RECEBENDO\n");
-  for(i=0;i<num_processos-1;i++){
-      MPI_Recv(vetor_part, num_processos-1, MPI_INTEGER, 0, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
   MPI_Finalize();
