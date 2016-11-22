@@ -70,104 +70,97 @@ void QuickSort(int *vetor, int inicio, int fim){
 }
 
 int main(int argc, char *argv[]){
-  int *vetor, *ListaPossiveisPivos;
+  /*variaveis dos processos mpi.*/
+  int comm_sz, my_rank;
+  MPI_Request request;
+  MPI_Status status;
+
+  int *vetor, *ListaPossiveisPivos, *pivos;
   int tam_vetor, num_processos;
   int i;
 
-
-
-  if(argc != 3)
-    return 1;
-
-  tam_vetor = atoi(argv[1]);
-  num_processos = atoi(argv[2]);
-
-  vetor = criaVetorAleatorio(tam_vetor);
-  if(vetor == NULL)
-    return 1;
-
-  ListaPossiveisPivos = (int*)malloc(((num_processos-1)*num_processos)*sizeof(int));
-  if(ListaPossiveisPivos == NULL)
-    return 1;
-
-  #pragma omp parallel num_threads(num_processos)
-  {
-    int inicio, fim;
-
-    inicio = omp_get_thread_num()*(tam_vetor/num_processos);
-    fim = (omp_get_thread_num() + 1)*(tam_vetor/num_processos);
-
-    /*Ordena as p partições do vetor usando QuickSort.*/
-    if(omp_get_thread_num() == (omp_get_num_threads() - 1))
-      QuickSort(vetor, inicio, tam_vetor-1);
-    else
-      QuickSort(vetor, inicio, fim-1);
-
-    /*escolhe os p*(p-1) possiveis pivos.*/
-    #pragma omp parallel for
-    for(i=0; i<((num_processos-1)*num_processos); i++)
-      ListaPossiveisPivos[i] = vetor[(i*tam_vetor)/(num_processos*num_processos)];
-  }
-
-  /*Garante que todas as threads tenha executado antes de passar para a próxima etapa do algoritmo*/
-  #pragma omp barrier
-
-  /*Ordena a lista de possiveis pivos.*/
-  QuickSort(ListaPossiveisPivos, 0, ((num_processos-1)*num_processos)-1);
-
-  int comm_sz, my_rank;
-  int *pivos;
-  int *vetor_part;
-
-  pivos = (int*)malloc(sizeof(int)*num_processos-1);
-  if(pivos == NULL)
-    return 1;
-
-  i = (tam_vetor/num_processos) + (tam_vetor%num_processos);
-
-  vetor_part = (int*)malloc(sizeof(int)*i);
-  if(vetor_part == NULL)
-        return 1;
-
-  comm_sz = num_processos;
-  MPI_Init(NULL, NULL);
+  MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
+  /*Faz a primeira parte usando o openmp.
+    Cria as threads e executa todas no
+      processo id = 0 do mpi.*/
   if(my_rank == 0){
-       //Define vetor de pivos
-        for(i=0;i<num_processos-1;i++){
-          pivos[i] = ListaPossiveisPivos[num_processos+(i*num_processos/2)-1];
-        }
 
-        MPI_Scatter(vetor, num_processos, MPI_INTEGER, vetor_part, (tam_vetor/num_processos) + (tam_vetor&num_processos),
-            MPI_INTEGER, 0, MPI_COMM_WORLD);
+    /*Caso nao hava os elementos minimos para comecar a ordenacao
+      o programa aborta todos os processos.*/
+    if(argc != 3)
+      MPI_Abort(MPI_COMM_WORLD, 1);
 
-        MPI_Bcast(pivos, num_processos-1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
+    tam_vetor = atoi(argv[1]);
+    num_processos = atoi(argv[2]);
+
+    vetor = criaVetorAleatorio(tam_vetor);
+    if(vetor == NULL)
+      MPI_Abort(MPI_COMM_WORLD, 1);
+
+    ListaPossiveisPivos = (int*)malloc(((num_processos-1)*num_processos)*sizeof(int));
+    if(ListaPossiveisPivos == NULL)
+      MPI_Abort(MPI_COMM_WORLD, 1);
+
+    pivos = (int*)malloc((num_processos-1)*sizeof(int));
+    if(pivos == NULL)
+        MPI_Abort(MPI_COMM_WORLD, 1);
+
+    #pragma omp parallel num_threads(num_processos)
+    {
+      int inicio, fim;
+
+      inicio = omp_get_thread_num()*(tam_vetor/num_processos);
+      fim = (omp_get_thread_num() + 1)*(tam_vetor/num_processos);
+
+      /*Ordena as p partições do vetor usando QuickSort.*/
+      if(omp_get_thread_num() == (omp_get_num_threads() - 1))
+        QuickSort(vetor, inicio, tam_vetor-1);
+      else
+        QuickSort(vetor, inicio, fim-1);
+
+      /*escolhe os p*(p-1) possiveis pivos.*/
+      #pragma omp parallel for
+      for(i=0; i<((num_processos-1)*num_processos); i++)
+        ListaPossiveisPivos[i] = vetor[(i*tam_vetor)/(num_processos*num_processos)];
+
+      /*Garante que todas as threads tenha executado antes de passar para a próxima etapa do algoritmo*/
+      #pragma omp barrier
+
+      /*Escolhe os pivos que serão usados na comunicação*/
+      #pragma omp parallel for
+      for(i=0; i<(num_processos-1); i++)
+        pivos[i] = ListaPossiveisPivos[(i+1)*num_processos + (num_processos/2) -1];
+    }
+
+    /*Garante que todas as threads tenha executado antes de passar para a próxima etapa do algoritmo*/
+    #pragma omp barrier
+
   }
 
-  int j, k;
-  for(j=0; j<(tam_vetor/num_processos); j++){
-      if(my_rank == 0){
-          if(vetor_part[j] > pivos[my_rank]){
-              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
-              k = j;
-          }
-      }else if(my_rank == num_processos-1){
-          if(vetor_part[j] < pivos[my_rank]){
-              MPI_Bcast(&vetor_part[j], 1, MPI_INTEGER, my_rank, MPI_COMM_WORLD);
-              k = j;
-          }
-      }else{
-          if(vetor_part[j] < )
-      }
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if(my_rank == 0){
+
+    #pragma omp parallel num_threads(num_processos)
+    {
+      int inicio, fim;
+
+      inicio = omp_get_thread_num()*(tam_vetor/num_processos);
+      fim = (omp_get_thread_num() + 1)*(tam_vetor/num_processos);
+
+      /*Ordena as p partições do vetor usando QuickSort.*/
+      if(omp_get_thread_num() == (omp_get_num_threads() - 1))
+        QuickSort(vetor, inicio, tam_vetor-1);
+      else
+        QuickSort(vetor, inicio, fim-1);
+
+      printVetor(vetor, tam_vetor);
+    }
   }
 
   MPI_Finalize();
 
-  //printVetor(ListaPossiveisPivos, ((num_processos-1)*num_processos));
-
-  printVetor(vetor, tam_vetor);
-
-  return 0;
 }
